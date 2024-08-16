@@ -17,7 +17,7 @@ from utils import *
 sizes = []
 formulas = []
 tags = []
-files = glob.glob("./*cif")
+files = glob.glob("./63*cif")
 tags_wmvo = []
 tags_womvo = []
 tags_wsp2n = []
@@ -46,5 +46,12 @@ for i in tqdm(files, total=len(files), desc="Progress"):
     six_rings = find_rings(G, 6)
     five_rings = find_rings(G, 5)
     tot_rings = six_rings + five_rings
-    # print(tot_rings)
-    add_Li_to_rings(tag, atoms, tot_rings, "./")
+    #print(tot_rings)
+    ##Adjusting for the Li already present in the cif
+    Li_indices = []
+    for idx, elements in enumerate(symbol):
+        if elements == "Li":
+            Li_indices.append(idx)
+    rings_excl_Li = [rings for rings in tot_rings if not any(num in rings for num in Li_indices)]
+    #print(rings_excl_Li)
+    add_Li_to_rings(tag, atoms, rings_excl_Li, "./")
