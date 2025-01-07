@@ -8,7 +8,7 @@ from ase.neighborlist import NeighborList
 import glob
 import networkx as nx
 from skspatial.objects import Plane, Points
-
+from ase.data import covalent_radii
 
 def unit_vector(v):
     """Determines unit vector"""
@@ -245,3 +245,83 @@ def add_Li_to_rings(name, atoms, rings, dest):
         atoms.append("Li")
         atoms.positions[-1] = coord
     write(f"{dest}{name}_ringsLi.cif", atoms, format="cif")
+
+def global_chem_feats(atoms):
+    symbols = atoms.get_chemical_symbols()
+    natoms = len(symbols)
+    o_indices = []
+    n_indices = []
+    c_indices = []
+    h_indices = []
+    for idx, elements in enumerate(symbols):
+        if elements == "O":
+            o_indices.append(idx)
+        if elements == "N":
+            n_indices.append(idx)
+        if elements == "C":
+            c_indices.append(idx)
+        if elements == "H":
+            h_indices.append(idx)
+   n_c = len(c_indices)
+   n_h = len(h_indices)
+   n_n = len(n_indices)
+   n_o = len(o_indices)
+   frac_c = n_c/natoms
+   frac_n = n_n/natoms
+   frac_o = n_o/natoms
+   frac_h = n_h/natoms
+   return frac_c, frac_h, frac_n, frac_o
+
+def determin_prox_sites(struc,G,sp2_o):
+    #if any(struc.get_pbc()):
+    #    struc.set_pbc(False)
+    symbols = struc.get_chemical_symbols()
+    numbers = np.array(struc.get_atomic_numbers())
+    BOB = []
+    for idx, elements in enumerate(symbols):
+        #if elements == "O" or elements == "N" or elements == "S":
+        #    ons.append(idx)
+    ## new neighborlist
+        if idx in sp2_o:
+            BOB.append(2.0)
+        else:
+            BOB.append(covalent_radii[numbers[idx]])
+    #print(BOB)
+    nl = NeighborList(cutoffs=BOB, bothways=True, self_interaction=False)
+    nl.update(struc)
+    #print(ons)
+    elems = ['N', 'O', 'S']
+    fp_feats_o = []
+    m = 0
+    if len(sp2_o) != 0:
+        for idx in sp2_o:
+            pr2o = []
+            pr2o_en = []
+            nei, _ = nl.get_neighbors(idx)
+            print("The neighborlist of", idx, "is", nei)
+            for i in nei:
+                if symbols[i] in elems:
+                    try:
+                        path = len(nx.shortest_path(G, source=idx, target = i))
+                        if path >=4:
+                            print("proximal atom found between", idx, "and", i)
+                            pr2o.append(i)
+                            pr2o_en.append(en_pau[symbols[i]])
+                    except:
+                        print("proximal atom found between", idx, "and", i)
+                        pr2o.append(i)
+                        pr2o_en.append(en_pau[symbols[i]])
+                else:
+                    print("not proximal")
+            n_pr2o = len(pr2o)
+            mean_pr2o_en = np.mean(pr2o_en)
+            feats = [n_pr2o, mean_pr2o_en]
+            fp_feats_o.append(feats)
+            print(fp_feats_o)
+    mean_fp_feats_o = calculate_means(fp_feats_o)
+    #print(mean_fp_feats_o)
+    return mean_fp_feats_o
+
+
+
+
