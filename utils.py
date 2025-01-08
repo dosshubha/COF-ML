@@ -6,6 +6,7 @@ from ase.neighborlist import get_connectivity_matrix
 from ase.neighborlist import natural_cutoffs
 from ase.neighborlist import NeighborList
 import glob
+import math
 import networkx as nx
 from skspatial.objects import Plane, Points
 from ase.data import covalent_radii
@@ -323,5 +324,71 @@ def determin_prox_sites(struc,G,sp2_o):
     return mean_fp_feats_o
 
 
+def determin_prox_sites_aprdf(struc,G,sp2_o,B):
+    #if any(struc.get_pbc()):
+    #    struc.set_pbc(False)
+    symbols = struc.get_chemical_symbols()
+    numbers = np.array(struc.get_atomic_numbers())
+    BOB = []
+    for idx, elements in enumerate(symbols):
+        #if elements == "O" or elements == "N" or elements == "S":
+        #    ons.append(idx)
+    ## new neighborlist
+        if idx in sp2_o:
+            BOB.append(2.0)
+        else:
+            BOB.append(covalent_radii[numbers[idx]])
+    #print(BOB)
+    nl = NeighborList(cutoffs=BOB, bothways=True, self_interaction=False)
+    nl.update(struc)
+    #print(ons)
+    elems = ['N', 'O', 'S']
+    fp_feats_o = []
+    m = 0
+    #B=100
+    rdf=np.zeros([10])
+    R=np.linspace(2,6,10)
+    if len(sp2_o) != 0:
+        for idx in sp2_o:
+            pr2o = []
+            pr2o_en = []
+            pr2o_d = []
+            nei, _ = nl.get_neighbors(idx)
+            print("The neighborlist of", idx, "is", nei)
+            for i in nei:
+                for l in range(R.size):
+                    rdf[l]+= en_pau[symbols[idx]]* en_pau[symbols[i]]*math.exp(-B*(struc.get_distance(idx,i)-R[l])**2)
+                if symbols[i] in elems:
+                    try:
+                        path = len(nx.shortest_path(G, source=idx, target = i))
+                        if path >=4:
+                            print("proximal atom found between", idx, "and", i)
+                            pr2o.append(i)
+                            pr2o_en.append(en_pau[symbols[i]])
+                            pr2o_d.append(struc.get_distance(idx,i))
+                    except:
+                        print("proximal atom found between", idx, "and", i)
+                        pr2o.append(i)
+                        pr2o_en.append(en_pau[symbols[i]])
+                        pr2o_d.append(struc.get_distance(idx,i))
+                else:
+                    print("not proximal")
+            n_pr2o = len(pr2o)
+            if n_pr2o != 0:
+                mean_pr2o_en = np.mean(pr2o_en)
+                max_pr2o_en = np.max(pr2o_en)
+                mean_pr2o_d = np.mean(pr2o_d)
+                min_pr2o_d = np.min(pr2o_d)
+            else:
+                mean_pr2o_en = 0.0
+                max_pr2o_en = 0.0
+                mean_pr2o_d = 10.0
+                min_pr2o_d = 10.0
+            feats = [n_pr2o, mean_pr2o_en, max_pr2o_en, mean_pr2o_d, min_pr2o_d]
+            fp_feats_o.append(feats)
+            print(fp_feats_o)
+    mean_fp_feats_o = calculate_means(fp_feats_o)
+    print(rdf)
+    return mean_fp_feats_o, rdf
 
 
