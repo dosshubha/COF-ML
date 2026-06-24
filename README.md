@@ -1,5 +1,3 @@
 # COF-ML
-A repository of python scripts to analyze and manipulate structures of covalent organic frameworks
+A repository for training machine learnning classifier for distinguishing anodic vs. cathodic behavior of Covalent Organic Frameworks and downstream prediction on the CORE COF data base
 
-# Dependecies
-ASE and NetworkX
