@@ -1,6 +1,6 @@
 # COF-ML
 
-This repository contains the dataset and machine learning workflows developed for predicting the electrochemical properties of covalent organic frameworks (COFs), including open-circuit voltage (OCV), gravimetric capacity
+This repository contains the dataset and machine learning workflows developed for predicting the electrochemical properties of covalent organic frameworks (COFs), including open-circuit voltage (OCV) and gravimetric capacity.
 
 ## Repository Contents
 
