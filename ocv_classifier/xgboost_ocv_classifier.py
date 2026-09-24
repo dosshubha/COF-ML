@@ -8,7 +8,7 @@ import joblib
 #--------------------------
 #0.load scikit-learn modules
 #--------------------------
-from sklearn.model_selection import RandomizedSearchCV, GridSearchCV, StratifiedKFold
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV, StratifiedKFold, RepeatedStratifiedKFold
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -23,7 +23,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import RFECV
 from sklearn.ensemble import VotingClassifier
-
+from sklearn.base import clone
 # ------------------------
 # 1. load data
 # ------------------------
@@ -96,6 +96,7 @@ param_grid = {
     "max_delta_step": [0, 1],
 }
 
+
 xgb_random = RandomizedSearchCV(
     estimator=xgb_clf,
     param_distributions=param_grid,
@@ -125,7 +126,6 @@ for idx, params in enumerate(top_params):
         colsample_bytree=params["colsample_bytree"],
         min_child_weight=params["min_child_weight"],
         max_delta_step=params["max_delta_step"],
-        # use_label_encoder=False,
         scale_pos_weight=scale_pos_weight,
         eval_metric="auc",
         random_state=100 + idx,
@@ -142,10 +142,7 @@ voting_clf = VotingClassifier(estimators=estimators, voting="hard", n_jobs=-1)
 # ------------------------
 pipeline_voting = Pipeline([("scaler", StandardScaler()), ("voting", voting_clf)])
 
-
-# ------------------------
-# 6. RFECV
-# ------------------------
+#helper function
 def avg_xgb_importance(estimator):
     """
     Given a fitted Pipeline, extract the VotingClassifier and average
@@ -157,77 +154,130 @@ def avg_xgb_importance(estimator):
     return np.mean(np.vstack(importances), axis=0)
 
 
-rfe_selector = RFECV(
-    estimator=pipeline_voting,
-    step=1,
-    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
-    scoring="balanced_accuracy",  # using accuracy for hard voting
-    n_jobs=-1,
-    verbose=1,
-    importance_getter=avg_xgb_importance,
-)
+#rfe_selector = RFECV(
+#    estimator=pipeline_voting,
+#    step=1,
+#    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+#    scoring="balanced_accuracy",  # using accuracy for hard voting
+#    n_jobs=-1,
+#    verbose=1,
+#    importance_getter=avg_xgb_importance,
+#)
 
 # Fit RFECV on the raw data to select features
-rfe_selector.fit(X_raw, Y)
+#rfe_selector.fit(X_raw, Y)
 
-support_mask = rfe_selector.support_
-selected_features = X_raw.columns[support_mask]
-print(f"\nSelected features ({len(selected_features)}): {list(selected_features)}")
+#support_mask = rfe_selector.support_
+#selected_features = X_raw.columns[support_mask]
+#print(f"\nSelected features ({len(selected_features)}): {list(selected_features)}")
 
-X = X_raw[selected_features]
+#X = X_raw[selected_features]
 
-# ------------------------
-# 7. downstream 10-fold CV using hard-voting ensemble,
-#    plus ROC-AUC and balanced accuracy
-# ------------------------
-n_splits = 10
-acc_train = np.zeros(n_splits)
-acc_test = np.zeros(n_splits)
-f1_train = np.zeros(n_splits)
-f1_test = np.zeros(n_splits)
-rocauc_train = np.zeros(n_splits)
-rocauc_test = np.zeros(n_splits)
-prauc_train = np.zeros(n_splits)
-prauc_test = np.zeros(n_splits)
-balacc_train = np.zeros(n_splits)
-balacc_test = np.zeros(n_splits)
+# -------------------------------------
+# 6. nested repeated 5x5 CV with RFECV
+# -------------------------------------
+n_splits = 5
+n_repeats = 5
+n_total_folds = n_splits * n_repeats
 
-skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+#acc_train = np.zeros(n_splits)
+#acc_test = np.zeros(n_splits)
+#f1_train = np.zeros(n_splits)
+#f1_test = np.zeros(n_splits)
+#rocauc_train = np.zeros(n_splits)
+#rocauc_test = np.zeros(n_splits)
+#prauc_train = np.zeros(n_splits)
+#prauc_test = np.zeros(n_splits)
+#balacc_train = np.zeros(n_splits)
+#balacc_test = np.zeros(n_splits)
+
+acc_train = np.zeros(n_total_folds)
+acc_test = np.zeros(n_total_folds)
+f1_train = np.zeros(n_total_folds)
+f1_test = np.zeros(n_total_folds)
+rocauc_train = np.zeros(n_total_folds)
+rocauc_test = np.zeros(n_total_folds)
+prauc_train = np.zeros(n_total_folds)
+prauc_test = np.zeros(n_total_folds)
+balacc_train = np.zeros(n_total_folds)
+balacc_test = np.zeros(n_total_folds)
+
+
+#skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+outer_cv = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats = n_repeats , random_state=42)
+
+selected_features_per_fold = []
+n_features_per_fold = []
+feature_selection_counts = pd.Series(0, index=X_raw.columns, dtype =int)
 
 tprs = []
 aucs = []
 mean_fpr = np.linspace(0, 1, 100)
-fig, ax = plt.subplots(figsize=(6, 6), tight_layout=True)
+fig, ax = plt.subplots(figsize=(4, 4))
 
-for rep, (idx_tr, idx_te) in enumerate(skf.split(X, Y)):
-    X_tr, X_te = X.iloc[idx_tr, :], X.iloc[idx_te, :]
+for cv_idx, (idx_tr, idx_te) in enumerate(outer_cv.split(X_raw, Y)): #replaced rep with cv_idx
+    repeat_idx = cv_idx//n_splits
+    fold_idx = cv_idx % n_splits
+    
+    X_tr_raw, X_te_raw = X_raw.iloc[idx_tr, :], X_raw.iloc[idx_te, :]
     y_tr, y_te = Y[idx_tr], Y[idx_te]
     fold_ids = np.take(cofid_fp.to_numpy(), idx_te)
     true_vol = np.take(vol_fp.to_numpy(), idx_te)
     fold_nli = np.take(nli_fp.to_numpy(), idx_te)
     fold_nrdx = np.take(n_rdx.to_numpy(), idx_te)
+    
 
-    # 7a. fitting the pipeline
-    pipeline_voting.fit(X_tr, y_tr)
+    # 6a. fitting the pipeline
+    #pipeline_voting.fit(X_tr_raw, y_tr)
 
-    # 7b. training
-    train_preds = pipeline_voting.predict(X_tr)
-    acc_train[rep] = 100 * accuracy_score(y_tr, train_preds)
-    f1_train[rep] = f1_score(y_tr, train_preds, average="weighted")
-    balacc_train[rep] = balanced_accuracy_score(y_tr, train_preds)
+    #### inner refcv using outer training data
+    inner_cv = StratifiedKFold(n_splits = 5, shuffle = True, random_state = 1000 + cv_idx)
+    fold_rfe_selector = RFECV(
+        estimator = clone(pipeline_voting),
+        step = 1,
+        min_features_to_select=8,
+        cv = inner_cv,
+        scoring = "balanced_accuracy",
+        n_jobs = -1,
+        verbose = 1,
+        importance_getter = avg_xgb_importance,
+    )
+    fold_rfe_selector.fit(X_tr_raw,y_tr)
+    # features selected in this outerfold
+    fold_support = fold_rfe_selector.support_
+    fold_selected_features = X_tr_raw.columns[fold_support]
+    selected_features_per_fold.append(list(fold_selected_features))
+    n_features_per_fold.append(len(fold_selected_features))
+    feature_selection_counts.loc[fold_selected_features] +=1
+    print(
+        f"\nRepeat{repeat_idx}, fold{fold_idx}:"
+        f"selected {len(fold_selected_features)} features"
+    )
+    print(list(fold_selected_features))
+    # Apply this fold's feature selection
+    X_tr = X_tr_raw.loc[:, fold_selected_features]
+    X_te = X_te_raw.loc[:, fold_selected_features]
+    # fresh model for this outer fold
+    fold_pipeline = clone(pipeline_voting)
+    fold_pipeline.fit(X_tr,y_tr)
+    # 6b. training predicitions
+    train_preds = fold_pipeline.predict(X_tr)
+    acc_train[cv_idx] = 100 * accuracy_score(y_tr, train_preds)
+    f1_train[cv_idx] = f1_score(y_tr, train_preds, average="weighted")
+    balacc_train[cv_idx] = balanced_accuracy_score(y_tr, train_preds)
 
-    # 7c. testing metrics
-    test_preds = pipeline_voting.predict(X_te)
-    acc_test[rep] = 100 * accuracy_score(y_te, test_preds)
-    f1_test[rep] = f1_score(y_te, test_preds, average="weighted")
-    balacc_test[rep] = balanced_accuracy_score(y_te, test_preds)
+    # 6c. Outer test predictions
+    test_preds = fold_pipeline.predict(X_te)
+    acc_test[cv_idx] = 100 * accuracy_score(y_te, test_preds)
+    f1_test[cv_idx] = f1_score(y_te, test_preds, average="weighted")
+    balacc_test[cv_idx] = balanced_accuracy_score(y_te, test_preds)
 
-    # 7d. computing ROC-AUC and PR-AUC using averaged probabilities
-    scaler_fitted = pipeline_voting.named_steps["scaler"]
+    # 6d. computing ROC-AUC and PR-AUC using averaged probabilities
+    scaler_fitted = fold_pipeline.named_steps["scaler"]
     X_tr_scaled = scaler_fitted.transform(X_tr)
     X_te_scaled = scaler_fitted.transform(X_te)
 
-    submodels = pipeline_voting.named_steps["voting"].estimators_
+    submodels = fold_pipeline.named_steps["voting"].estimators_
     train_probs_matrix = np.stack(
         [m.predict_proba(X_tr_scaled) for m in submodels], axis=0
     )
@@ -238,14 +288,14 @@ for rep, (idx_tr, idx_te) in enumerate(skf.split(X, Y)):
     test_probas = test_probs_matrix.mean(axis=0)  # shape = (n_samples, 2)
 
     # ROC-AUC
-    rocauc_train[rep] = roc_auc_score(y_tr, train_probas[:, 1])
-    rocauc_test[rep] = roc_auc_score(y_te, test_probas[:, 1])
+    rocauc_train[cv_idx] = roc_auc_score(y_tr, train_probas[:, 1])
+    rocauc_test[cv_idx] = roc_auc_score(y_te, test_probas[:, 1])
 
-    # PR-AUC
-    prauc_train[rep] = average_precision_score(y_tr, train_probas[:, 1])
-    prauc_test[rep] = average_precision_score(y_te, test_probas[:, 1])
+    # PR-AUC (not used in the paper)
+    prauc_train[cv_idx] = average_precision_score(y_tr, train_probas[:, 1])
+    prauc_test[cv_idx] = average_precision_score(y_te, test_probas[:, 1])
 
-    # 7e) ROC curve
+    # 6e) ROC curve
     fpr, tpr, _ = roc_curve(y_te, test_probas[:, 1])
     interp_tpr = np.interp(mean_fpr, fpr, tpr)
     interp_tpr[0] = 0.0
@@ -254,9 +304,10 @@ for rep, (idx_tr, idx_te) in enumerate(skf.split(X, Y)):
     aucs.append(fold_auc)
 
     # plot ROC curve
-    ax.plot(fpr, tpr, lw=1, alpha=0.5, label=f"ROC fold {rep} (AUC={fold_auc:.2f})")
+    #ax.plot(fpr, tpr, lw=1, alpha=0.08) ### comment out for main figure
+    #label=f"ROC fold {rep} (AUC={fold_auc:.2f})")
 
-    # 7f. identify right/wrong predictions on the test fold
+    # 6f. identify right/wrong predictions on the test fold
     for n, k in enumerate(fold_ids):
         prob0 = test_probas[n, 0]
         prob1 = test_probas[n, 1]
@@ -269,8 +320,8 @@ for rep, (idx_tr, idx_te) in enumerate(skf.split(X, Y)):
                 true_vol[n],
                 fold_nli[n],
                 fold_nrdx[n],
-                "in fold",
-                rep,
+                f"in repeat {repeat_idx}, fold {fold_idx}",
+                #rep,
             )
         else:
             print(
@@ -281,16 +332,34 @@ for rep, (idx_tr, idx_te) in enumerate(skf.split(X, Y)):
                 true_vol[n],
                 fold_nli[n],
                 fold_nrdx[n],
-                "in fold",
-                rep,
+                f"in repeat {repeat_idx}, fold {fold_idx}",
+                #rep,
             )
 
-    print(f"Finished fold {rep}\n")
+    print(f"Finished repeat {repeat_idx}/{n_repeats}, fold {fold_idx}/{n_splits}\n")
 
-# 7g. random ROC line
-ax.plot([0, 1], [0, 1], linestyle="--", color="grey", label="Random (AUC=0.50)")
+# Printing feature selection stability
+print("\n Number of featuress selected accross outer folds:")
+print(
+    f"{np.mean(n_features_per_fold):.1f}"
+    f"±{np.std(n_features_per_fold):.1f}"
+)
+print("\nFeature selection freqiencies:")
+feature_frequency =(
+    feature_selection_counts.sort_values(ascending=False).to_frame(name="times_selected")
+)
+feature_frequency["selection_fraction"]=(
+    feature_frequency["times_selected"]/n_total_folds
+)
+print(feature_frequency)
+feature_frequency.to_csv(
+    "nested_rfecv_feature_stability.csv"
+)
 
-# 7h. plotting mean ROC curve
+# 6g. random ROC line
+ax.plot([0, 1], [0, 1], linestyle="--", color="grey")#, label="Random (AUC=0.50)")
+
+# 6h. plotting mean ROC curve
 mean_tpr = np.mean(tprs, axis=0)
 mean_tpr[-1] = 1.0
 mean_auc_val = auc(mean_fpr, mean_tpr)
@@ -302,33 +371,33 @@ ax.plot(
     color="dodgerblue",
     lw=2,
     alpha=0.8,
-    label=r"Mean ROC (AUC=%0.2f±%0.2f)" % (mean_auc_val, std_auc_val),
+    #label=r"Mean ROC (AUC=%0.2f±%0.2f)" % (mean_auc_val, std_auc_val),
 )
 
-# 7i. plotting plus-minus 1 std. dev. around mean ROC
+# 6i. plotting plus-minus 1 std. dev. around mean ROC
 std_tpr = np.std(tprs, axis=0)
 tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
 tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
 
 ax.fill_between(
-    mean_fpr, tprs_lower, tprs_upper, color="grey", alpha=0.2, label=r"±1 std. dev."
+    mean_fpr, tprs_lower, tprs_upper, color="grey", alpha=0.2#, label=r"±1 std. dev."
 )
 
-ax.set(
-    xlabel="False Positive Rate",
-    ylabel="True Positive Rate",
-    #    fontsize=15
+#ax.set(
+#    xlabel="False Positive Rate",
+#    ylabel="True Positive Rate",
+    #fontsize=15
     # title="Mean ROC Curve (5 XGB Hard-Voting Ensemble)"
-)
+#)
 plt.tight_layout()
-# ax.set_xlabel("False Positive Rate", fontsize=12)
-# ax.set_ylabel("True Positive Rate", fontsize=12)
+ax.set_xlabel("False Positive Rate", fontsize=12)
+ax.set_ylabel("True Positive Rate", fontsize=12)
 ax.legend(loc="lower right", fontsize="small", frameon=False)
 # fig.savefig("./rocauc_hardvoting_xgb.png", dpi=300)
-fig.savefig("./rocauc_hardvoting_xgb_wCV.png", dpi=300)
-# fig.savefig("./rocauc_hardvoting_xgb.pdf", dpi=300)
+fig.savefig("./rocauc_hardvoting_xgb_wCV_final.png", dpi=600, bbox_inches="tight")
+fig.savefig("./rocauc_hardvoting_xgb_wCV_final.pdf", dpi=600,bbox_inches='tight')
 # ------------------------
-# 7j. summary of CV
+# 6j. summary of CV
 # ------------------------
 print(
     "\nSummary of 10-fold results (hard voting + ROC-AUC + PR-AUC + Balanced Accuracy):"
@@ -358,6 +427,28 @@ print(
     f"Test mean balanced accuracy:      {balacc_test.mean():.3f} ± {balacc_test.std():.3f}"
 )
 
+#=====================================
+# 7.Final REFCV on the complete dataset
+#=====================================
+
+final_inner_cv = StratifiedKFold(
+    n_splits = 5,
+    shuffle = True,
+    random_state= 42,
+)
+final_rfe_selector = RFECV(
+    estimator = clone(pipeline_voting),
+    step =1,
+    min_features_to_select=10,
+    cv = final_inner_cv,
+    scoring = "balanced_accuracy",
+    n_jobs = -1,
+    importance_getter = avg_xgb_importance,
+)
+final_rfe_selector.fit(X_raw,Y)
+selected_features = X_raw.columns[final_rfe_selector.support_]
+print(selected_features)
+X = X_raw[selected_features]
 # ------------------------
 # 8. final ensemble prediction: train each XGB on all data to get average feature importances
 # ------------------------
@@ -372,7 +463,6 @@ for params in top_params:
         colsample_bytree=params["colsample_bytree"],
         min_child_weight=params["min_child_weight"],
         max_delta_step=params["max_delta_step"],
-        # use_label_encoder=False,
         scale_pos_weight=scale_pos_weight,
         eval_metric="auc",
         random_state=42,
@@ -459,7 +549,7 @@ if os.path.exists("core_cof_features-2.npy"):
     # probas_new = loaded_pipeline.predict_proba(X_new)[:, 1]
     print("\nPredictions on new data:")
     print(preds_new)
-    np.save("preds-2.npy", preds_new)
+    np.save("preds-1.6.npy", preds_new)
     # print("\nProbabilities on new data:")
     # print(probas_new)
 
@@ -486,6 +576,7 @@ if os.path.exists("core_cof_features-2.npy"):
     # indices by predicted label
     positive_idx = np.where(preds_new == 1)[0]
     negative_idx = np.where(preds_new == 0)[0]
+    print("The fraction of cathodes are", len(positive_idx)/len(negative_idx))
 
     # printing
     print("\nSamples predicted = 1:")
