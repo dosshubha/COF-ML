@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+
+message: "If you use COF-ML in your research, please cite our publication in Advanced Science."
+
+type: software
+
+title: "COF-ML: Machine Learning for Covalent Organic Frameworks"
+
+authors:
+  - family-names: Das
+    given-names: Shubhajit
+
+repository-code: "https://github.com/dosshubha/COF-ML"
+
+preferred-citation:
+  type: article
+
+  title: "When are Two-Dimensional Covalent Organic Frameworks Good Electrodes for Lithium Ion Batteries? A Data-Driven Analysis"
+
+  authors:
+    - family-names: Bhauriyal
+      given-names: Preeti
+
+    - family-names: Das
+      given-names: Shubhajit
+
+    - family-names: Heine
+      given-names: Thomas
+
+  journal: "Advanced Science"
+  year: 2026
+  doi: "10.1002/advs.78599"
