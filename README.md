@@ -40,4 +40,13 @@ python xgboost_ocv_classifier.py
 ```bash
 python xgboost_cap_classifier.py
 ```
+## Citation
 
+If you use this repository in your research, please cite:
+
+**P. Bhauriyal, S. Das, and T. Heine**,  
+*When are Two-Dimensional Covalent Organic Frameworks Good Electrodes for Lithium Ion Batteries? A Data-Driven Analysis*,  
+**Advanced Science** (2026).  
+DOI: [10.1002/advs.78599](https://doi.org/10.1002/advs.78599)
+
+You can also use the **Cite this repository** option on GitHub to obtain the citation in BibTeX format.
